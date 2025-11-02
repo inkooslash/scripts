@@ -1,0 +1,185 @@
+--// Exploit Fix \\--
+if not pcall(function() return syn.protect_gui end) then
+    syn = {}
+    syn.protect_gui = function(A_1)
+        A_1.Parent = game:GetService("CoreGui")
+    end
+end
+
+--// Services \\--
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local PathfindingService = game:GetService("PathfindingService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local StarterGui = game:GetService("StarterGui")
+
+local Player = Players.LocalPlayer
+local Chest_Folder = Workspace:WaitForChild("Chests")
+local Griever_Folder = Workspace:WaitForChild("AIGrievers")
+local PumpkinsFolder = Workspace:WaitForChild("Pumpkins")
+local ClaimPumpkin = ReplicatedStorage:WaitForChild("Events"):WaitForChild("ClaimPumpkin")
+
+--// ESP Library \\--
+local ESP = loadstring(game:HttpGet("https://kiriot22.com/releases/ESP.lua"))()
+ESP:Toggle(true)
+ESP.Players = false
+ESP.Color = Color3.new(1, 1, 1)
+
+--// UI Library \\--
+local Library = loadstring(game:HttpGetAsync('https://raw.githubusercontent.com/Just-Egg-Salad/roblox-scripts/main/uwuware'))()
+local Window = Library:CreateWindow("inkooslash")
+
+--// Pumpkin Collector Flag \\--
+local isPumpkinAuto = false
+
+-- Wait for HumanoidRootPart
+local function getCharacterHRP()
+    local character = Player.Character or Player.CharacterAdded:Wait()
+    return character:WaitForChild("HumanoidRootPart", 10)
+end
+
+-- Teleport function
+local function teleportTo(position)
+    local hrp = getCharacterHRP()
+    if hrp then
+        hrp.CFrame = CFrame.new(position + Vector3.new(0, 5, 0))
+    else
+        warn("❌ Could not find HumanoidRootPart!")
+    end
+end
+
+-- Claim a single pumpkin
+local function claimSinglePumpkin(pumpkin)
+    teleportTo(pumpkin.Position)
+    task.wait(0.3)
+    ClaimPumpkin:FireServer(pumpkin)
+    print("✅ Claimed pumpkin:", pumpkin.Name)
+end
+
+-- Claim all pumpkins slowly
+local function claimAllPumpkins()
+    for _, pumpkin in ipairs(PumpkinsFolder:GetChildren()) do
+        if not isPumpkinAuto then break end
+        if pumpkin:IsA("BasePart") then
+            claimSinglePumpkin(pumpkin)
+            task.wait(2)
+        end
+    end
+end
+
+--// Add toggles and buttons \\--
+Window:AddToggle({
+    text = "Players",
+    callback = function(A_1)
+        ESP.Players = A_1
+    end
+})
+
+Window:AddToggle({ text = "Chests" })
+Window:AddToggle({ text = "Grievers" })
+
+-- Auto Pumpkins Toggle
+Window:AddToggle({
+    text = "Auto Pumpkins",
+    callback = function(value)
+        isPumpkinAuto = value
+    end
+})
+
+--// ESP Listeners \\--
+ESP:AddObjectListener(Chest_Folder, {
+    Recursive = true,
+    Validator = function(A_1)
+        return A_1.ClassName == "Model" and A_1:WaitForChild("Tier", 5)
+    end,
+    Color = Color3.new(0.3, 1, 0.3),
+    IsEnabled = function()
+        return Library.flags.Chests == true
+    end
+})
+
+ESP:AddObjectListener(Griever_Folder, {
+    PrimaryPart = function(A_1)
+        return A_1:FindFirstChild("HumanoidRootPart")
+    end,
+    IsEnabled = function(A_1)
+        local Humanoid = A_1.PrimaryPart.Parent:FindFirstChildOfClass("Humanoid")
+        return Humanoid and Humanoid.Health > 0 and Library.flags.Grievers == true
+    end,
+    Color = Color3.new(1, 0.3, 0.3)
+})
+
+--// Auto Pumpkin Collector Loop \\--
+spawn(function()
+    while true do
+        if isPumpkinAuto then
+            claimAllPumpkins()
+        end
+        task.wait(1)
+    end
+end)
+
+-- Move "Calculate Path" button and "Teleport Forwards" bind to the bottom
+Window:AddButton({
+    text = "Calculate Path",
+    callback = function()
+        -- Remove old path visuals
+        for _, obj in next, Player.Character:GetChildren() do
+            if obj.Name == "Ezpi" then
+                obj:Destroy()
+            end
+        end
+        -- Get closest chest
+        local Closest = false
+        local Distance = math.huge
+        for _, A_1 in next, Chest_Folder:GetDescendants() do
+            if A_1:IsA("Model") and A_1.PrimaryPart and A_1:FindFirstChild("Tier") then
+                local New_Distance = Player:DistanceFromCharacter(A_1.PrimaryPart.Position)
+                if New_Distance < Distance then
+                    Distance = New_Distance
+                    Closest = A_1.PrimaryPart
+                end
+            end
+        end
+        if not Closest then return end
+
+        -- Compute path
+        local Path = PathfindingService:CreatePath()
+        local Success = pcall(function()
+            Path:ComputeAsync(Player.Character.PrimaryPart.Position, Closest.Position)
+        end)
+
+        if Success and Path.Status == Enum.PathStatus.Success then
+            for _, Waypoint in next, Path:GetWaypoints() do
+                local Visual = Instance.new("Part")
+                Visual.Parent = Player.Character
+                Visual.Name = "Ezpi"
+                Visual.Shape = Enum.PartType.Ball
+                Visual.Anchored = true
+                Visual.Material = Enum.Material.Neon
+                Visual.CanCollide = false
+                Visual.CFrame = CFrame.new(Waypoint.Position)
+                Visual.Transparency = 0.7
+            end
+        elseif Path.Status == Enum.PathStatus.NoPath then
+            StarterGui:SetCore("SendNotification", {
+                Title = "Pathfinding",
+                Text = "No path found :("
+            })
+        else
+            StarterGui:SetCore("SendNotification", {
+                Title = "Pathfinding",
+                Text = "Error"
+            })
+        end
+    end
+})
+
+Window:AddBind({
+    text = "Teleport Forwards",
+    callback = function()
+        Player.Character.HumanoidRootPart.CFrame *= CFrame.new(0, 0, -12)
+    end
+})
+
+Library:Init()
